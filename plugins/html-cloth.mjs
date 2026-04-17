@@ -1,6 +1,17 @@
 export class HtmlCloth extends ArrivalScript {
     static scriptName = "HtmlCloth";
 
+    static SPEECH = {
+        idle: ["\u2026", "\u2026seriously?", "hi.", "what.", "okay.", "\u2026and?", "still here.", "great.", "hmm."],
+        pet: ["\u2026please.", "don't.", "weird.", "sure.", "fantastic.", "wow.", "okay then.", "\u2026"],
+        poke: ["ow.", "yep.", "great.", "wonderful.", "cool.", "fascinating.", "stop.", "\u2026seriously?"],
+        talk: ["wow.", "fascinating.", "\u2026and?", "uh huh.", "that's nice.", "okay.", "\u2026sure.", "mmhmm."],
+        mass: ["my mass is {v}? cool.", "{v}? sure.", "am I {v} now?", "is {v} better?", "fine, {v} it is."],
+        stiff: ["stiffness {v}. great.", "{v}? fine.", "i feel that.", "sure.", "{v}. wow."],
+        shine: ["am i metal now?", "shiny.", "why.", "{v} shine. great.", "look at me i guess.", "wow."],
+        color: ["interesting.", "i hate it.", "bold choice.", "\u2026sure.", "wow.", "really?", "that's a color."],
+    };
+
     width = 2.6;
     height = 2.6;
     segmentsX = 20;
@@ -14,13 +25,13 @@ export class HtmlCloth extends ArrivalScript {
     colliderDistance = 100;
     physicsHz = 120;
     physicsSubSteps = 8;
-    metalness = 0;
+    metalness = 0.5;
     glossiness = 0.5;
     debugFreeze = false;
     playerProxyHeight = 2.4;
     playerProxyWidth = 0.2;
-    textureWidth = 512;
-    textureHeight = 512;
+    textureWidth = 1024;
+    textureHeight = 1024;
 
     static properties = {
         width: { title: "Width", min: 0.5, max: 6, step: 0.1 },
@@ -137,21 +148,13 @@ export class HtmlCloth extends ArrivalScript {
 
         if (this._sourceEl) {
             this._elapsed += dt;
-            const t = this._elapsed;
-
-            const clock = this._sourceEl.querySelector("#htc-clock");
-            if (clock) clock.textContent = new Date().toLocaleTimeString();
-
-            const spinner = this._sourceEl.querySelector("#htc-spinner");
-            if (spinner) spinner.style.transform = `rotate(${(t * 180) % 360}deg)`;
-
-            const pulse = this._sourceEl.querySelector("#htc-pulse");
-            if (pulse) pulse.style.opacity = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(t * 4));
-
-            const slider = this._sourceEl.querySelector("#htc-slider");
-            if (slider) slider.style.transform = `translateX(${60 + 60 * Math.sin(t * 2)}px)`;
 
             this._drawVideoFrame();
+
+            // Curtis idle chatter: say a random idle line every ~9s of silence.
+            if (this._elapsed - (this._lastSpeak || -999) > 9) {
+                this._setSpeech(this._pickSpeech("idle"));
+            }
 
             this._refreshTexture();
         }
@@ -176,6 +179,10 @@ export class HtmlCloth extends ArrivalScript {
         this._teardownCurtain();
         this._restoreGrid();
         this.unlockInput();
+        if (this._keyboardLocked) {
+            this.unlockKeyboard();
+            this._keyboardLocked = false;
+        }
 
         if (this._sourceEl?.parentNode) {
             this._sourceEl.parentNode.removeChild(this._sourceEl);
@@ -190,16 +197,83 @@ export class HtmlCloth extends ArrivalScript {
         }
 
         this._worldLayer = this.app.scene.layers.getLayerByName("World");
-        this._createSourceElement();
-        this._createBlankTexture();
         this._createPhysicsWorld();
         this._createRenderMesh();
         this._createClothBody();
         this._createAnchorBodies();
         this._createNearbyColliders();
         this._updateRenderMesh();
-        this._scheduleTextureUpload();
-        this._setupInteraction();
+
+        if (this._htmlCanvasSupported()) {
+            this._createSourceElement();
+            this._createBlankTexture();
+            this._material.diffuseMap = this._texture;
+            this._material.update();
+            this._scheduleTextureUpload();
+            this._setupInteraction();
+        } else {
+            console.warn("[HtmlCloth] texElementImage2D is not supported in this browser; showing error texture.");
+            this._createErrorTexture();
+            this._material.diffuseMap = this._texture;
+            this._material.update();
+        }
+    }
+
+    _htmlCanvasSupported() {
+        const gl = this.app.graphicsDevice?.gl;
+        return !!(gl && typeof gl.texElementImage2D === "function");
+    }
+
+    _createErrorTexture() {
+        const w = 768, h = 768;
+        const c = document.createElement("canvas");
+        c.width = w;
+        c.height = h;
+        const ctx = c.getContext("2d");
+
+        ctx.fillStyle = "#f4ead9";
+        ctx.fillRect(0, 0, w, h);
+
+        ctx.strokeStyle = "#2a1f18";
+        ctx.lineWidth = 8;
+        ctx.strokeRect(24, 24, w - 48, h - 48);
+
+        ctx.fillStyle = "#d4654e";
+        ctx.font = "bold 120px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("!", w / 2, 220);
+
+        ctx.fillStyle = "#2a1f18";
+        ctx.font = "bold 48px sans-serif";
+        ctx.fillText("HTML IN CANVAS", w / 2, 340);
+        ctx.fillText("NOT SUPPORTED", w / 2, 398);
+
+        ctx.font = "28px sans-serif";
+        ctx.fillStyle = "rgba(42,31,24,0.75)";
+        ctx.fillText("Use Chrome and enable", w / 2, 480);
+
+        ctx.font = "bold 26px ui-monospace, Menlo, monospace";
+        ctx.fillStyle = "#2a1f18";
+        ctx.fillText("chrome://flags/", w / 2, 540);
+        ctx.fillText("#canvas-draw-element", w / 2, 580);
+
+        ctx.font = "italic 24px serif";
+        ctx.fillStyle = "rgba(42,31,24,0.55)";
+        ctx.fillText("— Curtis", w / 2, 680);
+
+        const device = this.app.graphicsDevice;
+        this._texture = new pc.Texture(device, {
+            width: w,
+            height: h,
+            format: pc.PIXELFORMAT_RGBA8,
+            mipmaps: false,
+            minFilter: pc.FILTER_LINEAR,
+            magFilter: pc.FILTER_LINEAR,
+            addressU: pc.ADDRESS_CLAMP_TO_EDGE,
+            addressV: pc.ADDRESS_CLAMP_TO_EDGE,
+        });
+        this._texture.setSource(c);
     }
 
     _createPhysicsWorld() {
@@ -286,7 +360,6 @@ export class HtmlCloth extends ArrivalScript {
         this._material.useLighting = true;
         this._material.useMetalness = true;
         this._material.cull = pc.CULLFACE_NONE;
-        this._material.diffuseMap = this._texture;
         this._material.diffuse = new pc.Color(1, 1, 1);
         this._material.emissive = new pc.Color(0, 0, 0);
         this._material.metalness = this.metalness;
@@ -488,7 +561,21 @@ export class HtmlCloth extends ArrivalScript {
             proxy.shape.setLocalScaling(this._tmpScale);
         }
 
-        this._setBodyTransform(proxy.body, proxy.entity.getPosition(), proxy.entity.getRotation());
+        // Predict one frame ahead based on the entity's frame-delta so the
+        // soft-body collision doesn't lag the player by a frame.
+        const pos = proxy.entity.getPosition();
+        let px = pos.x, py = pos.y, pz = pos.z;
+        if (proxy.prevPos) {
+            px += pos.x - proxy.prevPos.x;
+            py += pos.y - proxy.prevPos.y;
+            pz += pos.z - proxy.prevPos.z;
+        } else {
+            proxy.prevPos = new pc.Vec3();
+        }
+        proxy.prevPos.set(pos.x, pos.y, pos.z);
+        this._tmpPoint.set(px, py, pz);
+
+        this._setBodyTransform(proxy.body, this._tmpPoint, proxy.entity.getRotation());
     }
 
     _setBodyTransform(body, position, rotation) {
@@ -602,68 +689,346 @@ export class HtmlCloth extends ArrivalScript {
 
         this._sourceEl = document.createElement("div");
         this._sourceEl.style.cssText = [
-            `width:${this.textureWidth}px`, `height:${this.textureHeight}px`,
-            "padding:16px", "box-sizing:border-box",
-            "font-family:system-ui,sans-serif", "font-size:18px",
-            "color:#222", "background:#fff",
+            `width:${this.textureWidth}px`,
+            `height:${this.textureHeight}px`,
             "pointer-events:none",
             "position:relative",
         ].join(";");
 
-        this._sourceEl.innerHTML = [
-            "Hello world!<br>",
-            "I'm multi-line, <b>formatted</b>, rotated text ",
-            "with emoji (&#128512;), RTL text ",
-            '<span dir="rtl">\u0645\u0646 \u0641\u0627\u0631\u0633\u06CC \u0635\u062D\u0628\u062A \u0645\u06CC\u06A9\u0646\u0645</span>, ',
-            "vertical text,",
-            '<p style="writing-mode:vertical-rl;margin:8px 0;">\u8FD9\u662F\u5782\u76F4\u6587\u672C</p>',
-            '<canvas id="htc-video-canvas" width="140" height="164" style="position:absolute;right:16px;top:50%;transform:translateY(-50%);width:140px;height:164px;border-radius:8px;"></canvas>',
-            '<div id="htc-clock" style="font-family:monospace;font-size:32px;color:#2c3e50;margin:8px 0;">00:00:00</div>',
-            '<span id="htc-spinner" style="display:inline-block;font-size:28px;">\u2699\uFE0F</span> ',
-            '<span id="htc-pulse" style="color:#e74c3c;font-weight:bold;">LIVE</span> ',
-            '<span id="htc-slider" style="display:inline-block;background:#3498db;color:#fff;padding:2px 8px;border-radius:4px;font-size:14px;">sliding</span><br><br>',
-            "and an inline ",
-            '<svg width="50" height="50" style="vertical-align:middle">',
-            '  <circle cx="25" cy="25" r="20" fill="green"/>',
-            '  <text x="25" y="30" font-size="15" text-anchor="middle" fill="#fff">SVG</text>',
-            "</svg>!",
-            '<div style="position:absolute;bottom:24px;left:0;right:0;display:flex;justify-content:center;align-items:center;gap:12px;">',
-            '  <button id="htc-btn" style="',
-            '    font-size:18px;padding:12px 32px;border:none;border-radius:8px;',
-            '    background:#3498db;color:#fff;cursor:pointer;',
-            '    transition:background 0.2s,transform 0.2s;',
-            '  ">Click Me</button>',
-            '  <input id="htc-bg" type="color" value="#ffffff" style="',
-            '    width:48px;height:48px;border:none;border-radius:8px;',
-            '    background:transparent;cursor:pointer;padding:0;',
-            '  ">',
-            '</div>',
-        ].join("");
+        this._sourceEl.innerHTML = `
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700;800&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+#htc-root {
+    --bg: #f4ead9;
+    --bg-panel: #ede1c6;
+    --ink: #2a1f18;
+    --ink-dim: rgba(42,31,24,0.55);
+    --accent: #d4654e;
+    --line: rgba(42,31,24,0.2);
+
+    position: relative;
+    width: 100%;
+    height: 100%;
+    padding: 56px 60px;
+    box-sizing: border-box;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    overflow: hidden;
+}
+#htc-root *, #htc-root *::before, #htc-root *::after { box-sizing: border-box; }
+
+/* paper grain */
+#htc-root::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.5;
+    background-image:
+        radial-gradient(circle at 30% 20%, rgba(0,0,0,0.04) 2px, transparent 3px),
+        radial-gradient(circle at 70% 60%, rgba(0,0,0,0.035) 2px, transparent 3px),
+        radial-gradient(circle at 45% 85%, rgba(0,0,0,0.03) 2px, transparent 3px);
+    background-size: 320px 320px, 420px 420px, 380px 380px;
+    mix-blend-mode: multiply;
+}
+
+.topbar {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    border-bottom: 3px solid var(--ink);
+    padding-bottom: 22px;
+    margin-bottom: 36px;
+}
+.topbar .name {
+    font-family: 'Bricolage Grotesque', sans-serif;
+    font-weight: 800;
+    font-size: 88px;
+    line-height: 0.9;
+    letter-spacing: -0.03em;
+    color: var(--ink);
+}
+.topbar .name .diamond { color: var(--accent); margin-right: 12px; }
+.topbar .est {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 18px;
+    letter-spacing: 0.25em;
+    font-weight: 500;
+    color: var(--ink-dim);
+    text-transform: uppercase;
+}
+
+.main {
+    display: grid;
+    grid-template-columns: 360px 1fr;
+    gap: 48px;
+    margin-bottom: 40px;
+}
+
+.face-col { display: flex; flex-direction: column; gap: 24px; }
+.face-frame {
+    position: relative;
+    border: 3px solid var(--ink);
+    border-radius: 6px;
+    padding: 14px;
+    background: var(--bg-panel);
+}
+.face-frame::before {
+    content: 'SUBJECT';
+    position: absolute;
+    top: -13px;
+    left: 22px;
+    background: var(--bg);
+    padding: 0 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 0.3em;
+    color: var(--accent);
+}
+#htc-video-canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 194 / 228;
+    filter: contrast(0.95) saturate(0.85);
+    border-radius: 4px;
+}
+.id-strip {
+    display: flex;
+    justify-content: space-between;
+    padding-top: 12px;
+    border-top: 1px dashed var(--line);
+    font-size: 15px;
+    letter-spacing: 0.12em;
+    color: var(--ink-dim);
+    font-weight: 500;
+}
+.mood {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    font-size: 16px;
+    letter-spacing: 0.2em;
+    font-weight: 700;
+    color: var(--ink-dim);
+    text-transform: uppercase;
+}
+.mood-dot {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 5px rgba(212,101,78,0.18);
+    transition: background 0.3s, box-shadow 0.3s;
+}
+
+.ctrl-col { display: flex; flex-direction: column; gap: 32px; }
+
+.speech {
+    font-family: 'Instrument Serif', serif;
+    font-style: italic;
+    font-size: 68px;
+    line-height: 1.1;
+    color: var(--ink);
+    padding-bottom: 22px;
+    border-bottom: 1px solid var(--line);
+    min-height: 96px;
+}
+
+.sliders { display: flex; flex-direction: column; gap: 26px; }
+.slider-row {
+    display: grid;
+    grid-template-columns: 110px 1fr 90px;
+    align-items: center;
+    gap: 22px;
+}
+.slider-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    font-size: 20px;
+    letter-spacing: 0.22em;
+    color: var(--ink);
+}
+.slider-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    font-size: 20px;
+    color: var(--accent);
+    text-align: right;
+}
+
+input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 6px;
+    background: rgba(42,31,24,0.18);
+    outline: none;
+    padding: 0;
+    margin: 0;
+    border-radius: 3px;
+}
+input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 3px solid var(--ink);
+    cursor: pointer;
+    transition: transform 0.15s;
+}
+input[type="range"]::-moz-range-thumb {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 3px solid var(--ink);
+    cursor: pointer;
+}
+input[type="range"].hover::-webkit-slider-thumb { transform: scale(1.25); }
+
+.theme-row {
+    display: flex;
+    align-items: center;
+    gap: 22px;
+    padding-top: 4px;
+}
+.theme-row label {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    font-size: 20px;
+    letter-spacing: 0.22em;
+    color: var(--ink);
+}
+#htc-bg {
+    width: 64px;
+    height: 64px;
+    border: 3px solid var(--ink);
+    border-radius: 10px;
+    padding: 0;
+    background: transparent;
+    cursor: pointer;
+    transition: transform 0.15s;
+    overflow: hidden;
+}
+#htc-bg.hover { transform: scale(1.08); }
+
+.actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1.4fr;
+    gap: 24px;
+    border-top: 3px solid var(--ink);
+    padding-top: 32px;
+}
+.btn {
+    font-family: 'Bricolage Grotesque', sans-serif;
+    font-weight: 800;
+    font-size: 36px;
+    letter-spacing: 0.04em;
+    padding: 28px 16px;
+    background: transparent;
+    color: var(--ink);
+    border: 3px solid var(--ink);
+    border-radius: 12px;
+    cursor: pointer;
+    text-transform: uppercase;
+    transition: background 0.18s, color 0.18s, transform 0.18s, box-shadow 0.18s;
+}
+.btn.hover {
+    background: var(--ink);
+    color: var(--bg);
+    transform: translate(-3px, -3px);
+    box-shadow: 6px 6px 0 var(--accent);
+}
+.btn.active {
+    background: var(--accent);
+    color: var(--bg);
+}
+
+.talk-input {
+    grid-column: 1 / -1;
+    font-family: 'Arial', serif;
+    font-style: bold;
+    font-size: 34px;
+    padding: 18px 24px;
+    border: 3px solid var(--ink);
+    border-radius: 8px;
+    background: #ffffff;
+    color: var(--ink);
+    outline: none;
+    width: 100%;
+    display: none;
+    margin-top: 4px;
+}
+.talk-input.active { display: block; }
+.talk-input::placeholder { color: var(--ink-dim); font-style: italic; }
+</style>
+
+<div id="htc-root">
+    <header class="topbar">
+        <span class="name"><span class="diamond">◆</span>HTML in Canvas</span>
+        <span class="est">EST. 2026</span>
+    </header>
+
+    <div class="main">
+        <div class="face-col">
+            <div class="face-frame">
+                <canvas id="htc-video-canvas" width="194" height="228"></canvas>
+            </div>
+            <div class="id-strip">
+                <span>ID / 042</span>
+                <span>STATUS / AWAKE</span>
+            </div>
+            <div class="mood">
+                <span>MOOD</span>
+                <span class="mood-dot" id="htc-mood"></span>
+                <span id="htc-mood-text">FINE</span>
+            </div>
+        </div>
+
+        <div class="ctrl-col">
+            <div class="speech" id="htc-speech">"...seriously?"</div>
+
+            <div class="sliders">
+                <div class="slider-row">
+                    <span class="slider-label">MASS</span>
+                    <input type="range" id="htc-mass" min="1" max="5" step="0.1" value="1.2">
+                    <span class="slider-value" id="htc-mass-val">1.2</span>
+                </div>
+                <div class="slider-row">
+                    <span class="slider-label">STIFF</span>
+                    <input type="range" id="htc-stiff" min="0.1" max="1" step="0.05" value="0.9">
+                    <span class="slider-value" id="htc-stiff-val">0.90</span>
+                </div>
+                <div class="slider-row">
+                    <span class="slider-label">SHINE</span>
+                    <input type="range" id="htc-shine" min="0" max="1" step="0.05" value="0.5">
+                    <span class="slider-value" id="htc-shine-val">0.50</span>
+                </div>
+            </div>
+
+            <div class="theme-row">
+                <label for="htc-bg">THEME</label>
+                <input type="color" id="htc-bg" value="#d4654e">
+            </div>
+        </div>
+    </div>
+
+    <div class="actions">
+        <button class="btn" id="htc-pet">PET</button>
+        <button class="btn" id="htc-poke">POKE</button>
+        <button class="btn" id="htc-talk">TALK TO ME</button>
+        <input class="talk-input" id="htc-talk-input" type="text" placeholder="say something...">
+    </div>
+</div>
+`;
 
         canvas.appendChild(this._sourceEl);
-
-        const btn = this._sourceEl.querySelector("#htc-btn");
-        if (btn) {
-            btn.addEventListener("mouseenter", () => {
-                btn.style.background = "#2980b9";
-                btn.style.transform = "scale(1.05)";
-            });
-            btn.addEventListener("mouseleave", () => {
-                btn.style.background = "#3498db";
-                btn.style.transform = "scale(1)";
-            });
-            btn.addEventListener("click", () => {
-                btn.textContent = "Clicked!";
-            });
-        }
-
-        const bg = this._sourceEl.querySelector("#htc-bg");
-        if (bg) {
-            bg.addEventListener("input", () => {
-                this._sourceEl.style.background = bg.value;
-                this._refreshTexture();
-            });
-        }
+        this._wireInteractions();
 
         this._hiddenVideo = document.createElement("video");
         this._hiddenVideo.crossOrigin = "anonymous";
@@ -677,6 +1042,245 @@ export class HtmlCloth extends ArrivalScript {
         document.body.appendChild(this._hiddenVideo);
     }
 
+    _wireInteractions() {
+        const root = this._sourceEl.querySelector("#htc-root");
+
+        const petBtn = this._sourceEl.querySelector("#htc-pet");
+        const pokeBtn = this._sourceEl.querySelector("#htc-poke");
+        const talkBtn = this._sourceEl.querySelector("#htc-talk");
+        const talkInput = this._sourceEl.querySelector("#htc-talk-input");
+
+        petBtn.addEventListener("click", () => this._applyPet());
+        pokeBtn.addEventListener("click", () => {
+            const uv = this._lastHitUV || { u: 0.5, v: 0.85 };
+            this._applyPoke(uv.u, uv.v);
+        });
+        const focusTalk = () => {
+            talkInput.focus();
+            this._talkFocused = true;
+            if (!this._keyboardLocked) {
+                this.lockKeyboard();
+                this._keyboardLocked = true;
+            }
+        };
+        const blurTalk = () => {
+            if (!this._talkFocused) return;
+            talkInput.blur();
+            this._talkFocused = false;
+            if (this._keyboardLocked) {
+                this.unlockKeyboard();
+                this._keyboardLocked = false;
+            }
+        };
+        const closeTalk = (submit) => {
+            const text = talkInput.value.trim();
+            talkInput.value = "";
+            talkInput.classList.remove("active");
+            talkBtn.classList.remove("active");
+            this._talkActive = false;
+            blurTalk();
+            if (submit && text) this._curtisReacts("talk");
+        };
+
+        this._focusTalk = focusTalk;
+        this._blurTalk = blurTalk;
+
+        talkBtn.addEventListener("click", () => {
+            if (this._talkActive) {
+                closeTalk(false);
+                return;
+            }
+            this._talkActive = true;
+            talkInput.classList.add("active");
+            talkBtn.classList.add("active");
+            focusTalk();
+        });
+        talkInput.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") closeTalk(true);
+            else if (e.key === "Escape") closeTalk(false);
+        });
+
+        // Any click on the source that DIDN'T hit an interactive control counts
+        // as poking the cloth at the raycast location.
+        this._sourceEl.addEventListener("click", (e) => {
+            const tag = e.target.tagName;
+            if (tag === "BUTTON" || tag === "INPUT" || tag === "A" || tag === "SELECT" || tag === "TEXTAREA") return;
+            const uv = this._lastHitUV;
+            if (uv) this._applyPoke(uv.u, uv.v);
+        });
+
+        const mass = this._sourceEl.querySelector("#htc-mass");
+        const massVal = this._sourceEl.querySelector("#htc-mass-val");
+        mass.addEventListener("input", () => {
+            massVal.textContent = Number(mass.value).toFixed(1);
+            this.clothMass = Number(mass.value);
+            this._setClothNodeMass(this.clothMass);
+            this._curtisReacts("mass", { v: massVal.textContent });
+        });
+
+        const stiff = this._sourceEl.querySelector("#htc-stiff");
+        const stiffVal = this._sourceEl.querySelector("#htc-stiff-val");
+        stiff.addEventListener("input", () => {
+            stiffVal.textContent = Number(stiff.value).toFixed(2);
+            this.clothStiffness = Number(stiff.value);
+            this._setClothStiffness(this.clothStiffness);
+            this._curtisReacts("stiff", { v: stiffVal.textContent });
+        });
+
+        const shine = this._sourceEl.querySelector("#htc-shine");
+        const shineVal = this._sourceEl.querySelector("#htc-shine-val");
+        shine.addEventListener("input", () => {
+            shineVal.textContent = Number(shine.value).toFixed(2);
+            this.metalness = Number(shine.value);
+            this.glossiness = Number(shine.value);
+            if (this._material) {
+                this._material.metalness = this.metalness;
+                this._material.gloss = this.glossiness;
+                this._material.update();
+            }
+            this._curtisReacts("shine", { v: shineVal.textContent });
+        });
+
+        const bg = this._sourceEl.querySelector("#htc-bg");
+        bg.addEventListener("input", () => {
+            root.style.setProperty("--accent", bg.value);
+            this._curtisReacts("color");
+        });
+    }
+
+    _findInteractiveAt(clientX, clientY) {
+        if (!this._sourceEl) return null;
+        const elems = this._sourceEl.querySelectorAll("button, input, a, select, textarea");
+        for (const el of elems) {
+            const r = el.getBoundingClientRect();
+            if (clientX >= r.left && clientX < r.right && clientY >= r.top && clientY < r.bottom) {
+                return el;
+            }
+        }
+        return null;
+    }
+
+    _setClothNodeMass(totalMass) {
+        if (!this._clothBody || !totalMass) return;
+        const nodes = this._clothBody.get_m_nodes();
+        const count = nodes.size();
+        if (!count) return;
+        // inverse mass per node = count / total (since per-node mass = total/count)
+        const im = count / totalMass;
+        for (let i = 0; i < count; i++) {
+            nodes.at(i).set_m_im(im);
+        }
+    }
+
+    _setClothStiffness(k) {
+        if (!this._clothBody) return;
+        const material = this._clothBody.get_m_materials().at(0);
+        material.set_m_kLST(k);
+        material.set_m_kAST(k);
+        // Bullet caches per-link m_c0 from material.m_kLST at link construction.
+        // updateLinkConstants() recomputes that without touching rest lengths.
+        if (typeof this._clothBody.updateLinkConstants === "function") {
+            this._clothBody.updateLinkConstants();
+        }
+    }
+
+    _updateSliderFromClient(slider, clientX) {
+        const rect = slider.getBoundingClientRect();
+        if (!rect.width) return;
+        const min = Number(slider.min) || 0;
+        const max = Number(slider.max) || 100;
+        const step = Number(slider.step) || 1;
+        let t = (clientX - rect.left) / rect.width;
+        t = Math.max(0, Math.min(1, t));
+        let v = min + t * (max - min);
+        v = Math.round(v / step) * step;
+        v = Math.max(min, Math.min(max, v));
+        if (String(slider.value) === String(v)) return;
+        slider.value = v;
+        slider.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+
+    /* ── Curtis personality ───────────────────────────────── */
+
+    _pickSpeech(key, vars = {}) {
+        const pools = HtmlCloth.SPEECH;
+        const pool = pools[key] || pools.idle;
+        let line = pool[Math.floor(Math.random() * pool.length)];
+        for (const [k, v] of Object.entries(vars)) line = line.replace(`{${k}}`, v);
+        return line;
+    }
+
+    _setSpeech(text) {
+        const el = this._sourceEl?.querySelector("#htc-speech");
+        if (el) el.textContent = `"${text}"`;
+        this._lastSpeak = this._elapsed;
+    }
+
+    _curtisReacts(key, vars) {
+        this._setSpeech(this._pickSpeech(key, vars));
+        this._interactionCount = (this._interactionCount || 0) + 1;
+        this._updateMood();
+    }
+
+    _updateMood() {
+        const moodDot = this._sourceEl?.querySelector("#htc-mood");
+        const moodText = this._sourceEl?.querySelector("#htc-mood-text");
+        if (!moodDot || !moodText) return;
+        const c = this._interactionCount || 0;
+        let label, color;
+        if (c < 3) { label = "FINE"; color = "#6a8f65"; }
+        else if (c < 8) { label = "TIRED"; color = "#c59c3e"; }
+        else if (c < 16) { label = "ANNOYED"; color = "#d4654e"; }
+        else { label = "DONE"; color = "#8e3a2e"; }
+        moodText.textContent = label;
+        moodDot.style.background = color;
+        moodDot.style.boxShadow = `0 0 0 5px ${color}30`;
+    }
+
+    /* ── cloth physical reactions ─────────────────────────── */
+
+    _applyPet() {
+        if (!this._clothBody) return;
+        const nodes = this._clothBody.get_m_nodes();
+        const count = nodes.size();
+        const f = new Ammo.btVector3(0, -4, -1.5);
+        for (let i = 0; i < count; i++) this._clothBody.addForce(f, i);
+        Ammo.destroy(f);
+        this._curtisReacts("pet");
+    }
+
+    _applyPoke(u, v) {
+        if (!this._clothBody) return;
+        const cols = this._segmentCountX();
+        const rows = this._segmentCountY();
+        const nx = Math.max(0, Math.min(cols, Math.round(u * cols)));
+        const ny = Math.max(0, Math.min(rows, Math.round(v * rows)));
+        const centerIdx = ny * (cols + 1) + nx;
+
+        // Push in the direction the player is looking — i.e. into the cloth.
+        const cam = ArrivalSpace.getCamera?.();
+        const fwd = cam?.forward ?? this.entity.forward;
+        const mag = 180;
+
+        // Apply to the hit node plus a small splash of neighbors for a ripple.
+        const nodeSize = this._clothBody.get_m_nodes().size();
+        const radius = 1;
+        for (let dy = -radius; dy <= radius; dy++) {
+            for (let dx = -radius; dx <= radius; dx++) {
+                const px = nx + dx;
+                const py = ny + dy;
+                if (px < 0 || px > cols || py < 0 || py > rows) continue;
+                const idx = py * (cols + 1) + px;
+                if (idx < 0 || idx >= nodeSize) continue;
+                const falloff = (dx === 0 && dy === 0) ? 1 : 0.4;
+                const fn = new Ammo.btVector3(fwd.x * mag * falloff, fwd.y * mag * falloff, fwd.z * mag * falloff);
+                this._clothBody.addForce(fn, idx);
+                Ammo.destroy(fn);
+            }
+        }
+        this._curtisReacts("poke");
+    }
+
     _drawVideoFrame() {
         const video = this._hiddenVideo;
         if (!video || video.readyState < 2 || !this._sourceEl) return;
@@ -685,11 +1289,9 @@ export class HtmlCloth extends ArrivalScript {
 
         // Toggle canvas.width each frame to invalidate the element's paint
         // record so texElementImage2D re-reads the bitmap.
-        const baseW = video.videoWidth || 140;
+        const baseW = video.videoWidth || 194;
         videoCanvas.width = baseW + ((this._videoTick = (this._videoTick || 0) + 1) & 1);
-        videoCanvas.height = video.videoHeight || 140;
-        videoCanvas.style.width = "140px";
-        videoCanvas.style.height = `${140 * (videoCanvas.height / baseW)}px`;
+        videoCanvas.height = video.videoHeight || 228;
 
         const ctx = videoCanvas.getContext("2d");
         if (ctx) ctx.drawImage(video, 0, 0, videoCanvas.width, videoCanvas.height);
@@ -954,26 +1556,32 @@ export class HtmlCloth extends ArrivalScript {
         if (!this._sourceEl || this._dispatching) return;
 
         const uv = this._raycastMeshUV(e.clientX, e.clientY);
+        if (uv) this._lastHitUV = uv;
 
         if (!uv) {
             if (this._hoveredTarget) {
                 this._sourceEl.style.pointerEvents = "auto";
+                this._hoveredTarget.classList?.remove("hover");
                 this._hoveredTarget.dispatchEvent(new MouseEvent("mouseleave", { bubbles: false }));
                 this._sourceEl.style.pointerEvents = "none";
                 this._hoveredTarget = null;
                 this.app.graphicsDevice.canvas.style.cursor = "";
                 this._refreshTexture();
             }
-            if (this._inputLocked && !this._selecting) {
+            if (this._inputLocked && !this._selecting && !this._talkFocused) {
                 this.unlockInput();
                 this._inputLocked = false;
             }
             if (type === "mouseup") {
                 this._selecting = false;
-                if (this._inputLocked) {
+                this._draggedSlider = null;
+                if (this._inputLocked && !this._talkFocused) {
                     this.unlockInput();
                     this._inputLocked = false;
                 }
+            }
+            if (type === "mousedown" && this._talkFocused) {
+                this._blurTalk?.();
             }
             return;
         }
@@ -991,12 +1599,19 @@ export class HtmlCloth extends ArrivalScript {
         this._sourceEl.style.zIndex = "999999";
         this._sourceEl.style.position = "relative";
 
-        const target = document.elementFromPoint(clientX, clientY) || this._sourceEl;
+        // elementFromPoint returns null for coords outside the viewport, which
+        // breaks hit-testing on a 1024x1024 source div that overflows. Use
+        // per-element getBoundingClientRect instead — works regardless.
+        const target = this._findInteractiveAt(clientX, clientY)
+            || document.elementFromPoint(clientX, clientY)
+            || this._sourceEl;
 
         if (target !== this._hoveredTarget) {
             if (this._hoveredTarget) {
+                this._hoveredTarget.classList?.remove("hover");
                 this._hoveredTarget.dispatchEvent(new MouseEvent("mouseleave", { bubbles: false }));
             }
+            target.classList?.add("hover");
             target.dispatchEvent(new MouseEvent("mouseenter", { bubbles: false }));
             this._hoveredTarget = target;
         }
@@ -1005,10 +1620,8 @@ export class HtmlCloth extends ArrivalScript {
         const tag = target.tagName;
         const inputType = tag === "INPUT" ? (target.type || "").toLowerCase() : "";
         const textInputTypes = new Set(["text", "password", "email", "number", "search", "tel", "url", ""]);
-        if (tag === "BUTTON" || tag === "A") {
+        if (tag === "BUTTON" || tag === "A" || (tag === "INPUT" && !textInputTypes.has(inputType))) {
             canvas.style.cursor = "pointer";
-        } else if (tag === "INPUT" && !textInputTypes.has(inputType)) {
-            canvas.style.cursor = "default";
         } else {
             canvas.style.cursor = "text";
         }
@@ -1021,18 +1634,36 @@ export class HtmlCloth extends ArrivalScript {
         }));
         this._dispatching = false;
 
+        const interactiveTags = new Set(["BUTTON", "INPUT", "A", "SELECT", "TEXTAREA"]);
         if (type === "mousedown") {
             this.lockInput();
             this._inputLocked = true;
             this._mouseDownTarget = target;
             this._clearHighlight();
+            this._selReady = false;
+            this._selecting = false;
 
-            const range = document.caretRangeFromPoint(clientX, clientY);
-            if (range && this._sourceEl.contains(range.startContainer)) {
-                this._selAnchorNode = range.startContainer;
-                this._selAnchorOffset = range.startOffset;
-                this._selReady = true;
+            if (target?.id === "htc-talk-input") {
+                if (!this._talkFocused) this._focusTalk?.();
+            } else if (this._talkFocused) {
+                this._blurTalk?.();
             }
+
+            if (target?.tagName === "INPUT" && target.type === "range") {
+                this._draggedSlider = target;
+                this._updateSliderFromClient(target, clientX);
+            }
+
+            if (!interactiveTags.has(tag)) {
+                const range = document.caretRangeFromPoint(clientX, clientY);
+                if (range && this._sourceEl.contains(range.startContainer)) {
+                    this._selAnchorNode = range.startContainer;
+                    this._selAnchorOffset = range.startOffset;
+                    this._selReady = true;
+                }
+            }
+        } else if (type === "mousemove" && this._draggedSlider) {
+            this._updateSliderFromClient(this._draggedSlider, clientX);
         } else if (type === "mousemove" && (this._selecting || this._selReady)) {
             if (this._selReady && !this._selecting) {
                 this._selecting = true;
@@ -1060,20 +1691,32 @@ export class HtmlCloth extends ArrivalScript {
                 } catch (ex) {}
             }
         } else if (type === "mouseup" && this._mouseDownTarget && !this._selecting) {
-            this._dispatching = true;
-            target.dispatchEvent(new MouseEvent("click", {
-                bubbles: true, cancelable: true, clientX, clientY, button: e.button,
-            }));
-            this._dispatching = false;
+            if (!this._draggedSlider) {
+                this._dispatching = true;
+                target.dispatchEvent(new MouseEvent("click", {
+                    bubbles: true, cancelable: true, clientX, clientY, button: e.button,
+                }));
+                this._dispatching = false;
+            }
             this._mouseDownTarget = null;
+            this._draggedSlider = null;
         } else if (type === "mouseup") {
             this._selecting = false;
             this._selReady = false;
             this._mouseDownTarget = null;
+            this._draggedSlider = null;
         }
 
         this._sourceEl.style.pointerEvents = "none";
         this._sourceEl.style.zIndex = "";
+
+        // While the user is typing, real clicks land on the WebGL canvas and
+        // the browser blurs our text input. Re-assert focus every frame.
+        if (this._talkFocused) {
+            const talkInput = this._sourceEl.querySelector("#htc-talk-input");
+            if (talkInput && document.activeElement !== talkInput) talkInput.focus();
+        }
+
         this._refreshTexture();
     }
 

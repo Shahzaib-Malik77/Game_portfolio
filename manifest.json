@@ -1,7 +1,7 @@
 {
   "format": "arrival.space-export",
   "version": 2,
-  "exportedAt": "2026-04-17T13:42:37.693Z",
+  "exportedAt": "2026-04-17T13:43:17.466Z",
   "sourceSpaceId": "42485456_5879",
   "sourceRoom": "custom.travel.center.42485456_5879",
   "entities": [
@@ -44,11 +44,6 @@
       "id": "fcc35518-309c-47e1-8d93-d939d6bca475",
       "type": "Gate",
       "file": "entities/fcc35518-309c-47e1-8d93-d939d6bca475.json"
-    },
-    {
-      "id": "user-model-juiqvi",
-      "type": "UserModelEntity",
-      "file": "entities/user-model-juiqvi.json"
     },
     {
       "id": "user-model-nx8ohk",

@@ -2,7 +2,7 @@
   "id": "user-model-nx8ohk",
   "type": "UserModelEntity",
   "data": {
-    "glbUrl": "plugins/html-cloth_2.mjs",
+    "glbUrl": "plugins/html-cloth.mjs",
     "position": {
       "x": 0.09119614958763123,
       "y": 2.6983907222747803,
