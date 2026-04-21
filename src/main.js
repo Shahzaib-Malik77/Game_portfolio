@@ -1,8 +1,10 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import "./styles.css";
 
 const app = document.querySelector("#app");
+const AVATAR_URL = "https://ugc.arrival.space/42485456/avatar-1775753927192.glb";
 
 app.innerHTML = `
   <canvas class="scene" aria-label="3D animated cloth portfolio scene"></canvas>
@@ -73,12 +75,14 @@ createSky();
 createFloor();
 const cloth = createCloth();
 const avatar = createAvatar();
+avatar.visible = false;
 scene.add(cloth.mesh, avatar);
+loadAvatarModel();
 
 window.addEventListener("resize", onResize);
 document.querySelector("#focusCloth").addEventListener("click", focusCloth);
 
-setTimeout(() => loader.classList.add("hidden"), 500);
+setTimeout(() => loader.classList.add("hidden"), 1200);
 renderer.setAnimationLoop(render);
 
 function createSky() {
@@ -183,7 +187,7 @@ function createCloth() {
   });
 
   const mesh = new THREE.Mesh(geometry, material);
-  mesh.position.set(0, 1.8, 0);
+  mesh.position.set(-0.22, 1.9, -0.18);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
 
@@ -196,7 +200,7 @@ function createCloth() {
       side: THREE.DoubleSide,
     })
   );
-  backing.position.set(0.02, 1.77, -0.055);
+  backing.position.set(-0.2, 1.87, -0.25);
   backing.castShadow = true;
   backing.receiveShadow = true;
   scene.add(backing);
@@ -204,10 +208,46 @@ function createCloth() {
   return { mesh, basePositions, cols, rows };
 }
 
+function loadAvatarModel() {
+  const gltfLoader = new GLTFLoader();
+  gltfLoader.load(
+    AVATAR_URL,
+    (gltf) => {
+      const model = gltf.scene;
+      model.name = "ArrivalStyleAvatar";
+      model.position.set(1.35, -1.28, 2.18);
+      model.rotation.set(0, -0.22, 0);
+      model.scale.setScalar(1.02);
+      model.userData.baseY = model.position.y;
+
+      model.traverse((child) => {
+        if (!child.isMesh) return;
+        child.castShadow = true;
+        child.receiveShadow = true;
+        if (child.material) {
+          child.material.roughness = Math.min(child.material.roughness ?? 0.7, 0.82);
+          child.material.needsUpdate = true;
+        }
+      });
+
+      scene.remove(avatar);
+      scene.add(model);
+      avatar.userData.model = model;
+      loader.classList.add("hidden");
+    },
+    undefined,
+    () => {
+      avatar.visible = true;
+      loader.classList.add("hidden");
+    }
+  );
+}
+
 function createAvatar() {
   const group = new THREE.Group();
   group.position.set(1.95, -0.55, 2.35);
   group.rotation.y = -0.22;
+  group.userData.baseY = group.position.y;
 
   const skin = new THREE.MeshStandardMaterial({ color: 0xf0b890, roughness: 0.55 });
   const hair = new THREE.MeshStandardMaterial({ color: 0xd8b14b, roughness: 0.8 });
@@ -288,8 +328,9 @@ function animateCloth(time) {
 }
 
 function animateAvatar(time) {
-  avatar.position.y = -0.55 + Math.sin(time * 1.4) * 0.025;
-  avatar.rotation.y = -0.22 + Math.sin(time * 0.7) * 0.045;
+  const model = avatar.userData.model || avatar;
+  model.position.y = (model.userData.baseY ?? model.position.y) + Math.sin(time * 1.4) * 0.025;
+  model.rotation.y = -0.22 + Math.sin(time * 0.7) * 0.035;
 }
 
 function focusCloth() {
