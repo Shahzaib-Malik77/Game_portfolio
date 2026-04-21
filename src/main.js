@@ -30,6 +30,7 @@ const keys = new Set();
 const avatarMotion = {
   mixer: null,
   action: null,
+  rig: null,
   isMoving: false,
   direction: new THREE.Vector3(),
   cameraForward: new THREE.Vector3(),
@@ -247,6 +248,7 @@ function loadAvatarModel() {
           child.material.needsUpdate = true;
         }
       });
+      avatarMotion.rig = buildProceduralRig(model);
 
       scene.remove(avatar);
       scene.add(model);
@@ -362,11 +364,9 @@ function animateAvatar(time, delta) {
     avatarMotion.action.paused = !avatarMotion.isMoving;
     avatarMotion.action.timeScale = avatarMotion.isMoving ? 1.2 : 0.2;
     avatarMotion.mixer.update(delta);
-  } else {
-    const idleBob = Math.sin(time * 1.4) * 0.02;
-    const walkBob = avatarMotion.isMoving ? Math.abs(Math.sin(time * 8.5)) * 0.06 : 0;
-    model.position.y = (model.userData.baseY ?? model.position.y) + idleBob + walkBob;
   }
+
+  animateProceduralRig(model, time);
 }
 
 function updateAvatarMovement(model, time, delta) {
@@ -404,6 +404,101 @@ function updateAvatarMovement(model, time, delta) {
 function lerpAngle(from, to, amount) {
   const delta = Math.atan2(Math.sin(to - from), Math.cos(to - from));
   return from + delta * amount;
+}
+
+function buildProceduralRig(model) {
+  const bones = [];
+  model.traverse((child) => {
+    if (child.isBone) bones.push(child);
+  });
+
+  if (!bones.length) return null;
+
+  const rig = {
+    bones,
+    hips: findBone(bones, ["hip", "pelvis", "root"]),
+    spine: findBone(bones, ["spine", "chest"]),
+    head: findBone(bones, ["head", "neck"]),
+    leftUpperArm: findLimbBone(bones, "left", ["upperarm", "arm", "shoulder"], ["forearm", "hand", "leg", "foot"]),
+    rightUpperArm: findLimbBone(bones, "right", ["upperarm", "arm", "shoulder"], ["forearm", "hand", "leg", "foot"]),
+    leftLowerArm: findLimbBone(bones, "left", ["forearm", "lowerarm", "elbow"], ["hand", "leg", "foot"]),
+    rightLowerArm: findLimbBone(bones, "right", ["forearm", "lowerarm", "elbow"], ["hand", "leg", "foot"]),
+    leftUpperLeg: findLimbBone(bones, "left", ["upleg", "upperleg", "thigh"], ["calf", "shin", "foot", "toe"]),
+    rightUpperLeg: findLimbBone(bones, "right", ["upleg", "upperleg", "thigh"], ["calf", "shin", "foot", "toe"]),
+    leftLowerLeg: findLimbBone(bones, "left", ["leg", "calf", "shin"], ["upleg", "upperleg", "thigh", "foot", "toe"]),
+    rightLowerLeg: findLimbBone(bones, "right", ["leg", "calf", "shin"], ["upleg", "upperleg", "thigh", "foot", "toe"]),
+    leftFoot: findLimbBone(bones, "left", ["foot"], ["toe"]),
+    rightFoot: findLimbBone(bones, "right", ["foot"], ["toe"]),
+  };
+
+  for (const bone of bones) {
+    bone.userData.baseQuaternion = bone.quaternion.clone();
+  }
+
+  return rig;
+}
+
+function findBone(bones, includes) {
+  return bones.find((bone) => {
+    const name = normalizeBoneName(bone.name);
+    return includes.some((part) => name.includes(part));
+  }) || null;
+}
+
+function findLimbBone(bones, side, includes, excludes = []) {
+  const sideTokens = side === "left" ? ["left", "_l", ".l", " l", "l_"] : ["right", "_r", ".r", " r", "r_"];
+
+  return bones.find((bone) => {
+    const raw = bone.name.toLowerCase();
+    const name = normalizeBoneName(bone.name);
+    const hasSide = sideTokens.some((token) => raw.includes(token)) || name.includes(side);
+    const hasPart = includes.some((part) => name.includes(part));
+    const blocked = excludes.some((part) => name.includes(part));
+    return hasSide && hasPart && !blocked;
+  }) || null;
+}
+
+function normalizeBoneName(name) {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function applyBoneSwing(bone, x = 0, y = 0, z = 0) {
+  if (!bone?.userData.baseQuaternion) return;
+
+  const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(x, y, z, "XYZ"));
+  bone.quaternion.copy(bone.userData.baseQuaternion).multiply(rotation);
+}
+
+function animateProceduralRig(model, time) {
+  const rig = avatarMotion.rig;
+  const walk = avatarMotion.isMoving ? 1 : 0;
+  const idle = 1 - walk;
+  const cycle = time * 8.2;
+  const stride = Math.sin(cycle) * walk;
+  const counter = Math.sin(cycle + Math.PI) * walk;
+  const lift = Math.max(0, Math.sin(cycle)) * walk;
+  const oppositeLift = Math.max(0, Math.sin(cycle + Math.PI)) * walk;
+  const idleBreath = Math.sin(time * 1.8) * idle;
+
+  model.position.y = (model.userData.baseY ?? model.position.y) + idleBreath * 0.015 + Math.abs(Math.sin(cycle)) * 0.045 * walk;
+
+  if (!rig) return;
+
+  applyBoneSwing(rig.hips, idleBreath * 0.025, 0, stride * 0.035);
+  applyBoneSwing(rig.spine, -idleBreath * 0.018, stride * 0.025, -stride * 0.025);
+  applyBoneSwing(rig.head, idleBreath * 0.012, -stride * 0.018, 0);
+
+  applyBoneSwing(rig.leftUpperArm, counter * 0.48, 0, 0.06);
+  applyBoneSwing(rig.rightUpperArm, stride * 0.48, 0, -0.06);
+  applyBoneSwing(rig.leftLowerArm, Math.max(0.08, lift * 0.36), 0, 0);
+  applyBoneSwing(rig.rightLowerArm, Math.max(0.08, oppositeLift * 0.36), 0, 0);
+
+  applyBoneSwing(rig.leftUpperLeg, stride * 0.62, 0, 0);
+  applyBoneSwing(rig.rightUpperLeg, counter * 0.62, 0, 0);
+  applyBoneSwing(rig.leftLowerLeg, -oppositeLift * 0.78, 0, 0);
+  applyBoneSwing(rig.rightLowerLeg, -lift * 0.78, 0, 0);
+  applyBoneSwing(rig.leftFoot, lift * 0.34, 0, 0);
+  applyBoneSwing(rig.rightFoot, oppositeLift * 0.34, 0, 0);
 }
 
 function focusCloth() {
