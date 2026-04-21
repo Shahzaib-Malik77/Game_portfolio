@@ -246,21 +246,21 @@ export class HtmlCloth extends ArrivalScript {
 
         ctx.fillStyle = "#2a1f18";
         ctx.font = "bold 48px sans-serif";
-        ctx.fillText("HTML IN CANVAS", w / 2, 340);
-        ctx.fillText("NOT SUPPORTED", w / 2, 398);
+        ctx.fillText("M.SHAHZAIB", w / 2, 340);
+        ctx.fillText("WAJID", w / 2, 398);
 
         ctx.font = "28px sans-serif";
         ctx.fillStyle = "rgba(42,31,24,0.75)";
-        ctx.fillText("Use Chrome and enable", w / 2, 480);
+        ctx.fillText("Personal Portfolio", w / 2, 480);
 
         ctx.font = "bold 26px ui-monospace, Menlo, monospace";
         ctx.fillStyle = "#2a1f18";
-        ctx.fillText("chrome://flags/", w / 2, 540);
-        ctx.fillText("#canvas-draw-element", w / 2, 580);
+        ctx.fillText("M.Shahzaib Wajid", w / 2, 540);
+        ctx.fillText("Creative Developer", w / 2, 580);
 
         ctx.font = "italic 24px serif";
         ctx.fillStyle = "rgba(42,31,24,0.55)";
-        ctx.fillText("— Curtis", w / 2, 680);
+        ctx.fillText("M.Shahzaib Wajid", w / 2, 680);
 
         const device = this.app.graphicsDevice;
         this._texture = new pc.Texture(device, {
@@ -970,7 +970,7 @@ input[type="range"].hover::-webkit-slider-thumb { transform: scale(1.25); }
 
 <div id="htc-root">
     <header class="topbar">
-        <span class="name"><span class="diamond">◆</span>HTML in Canvas</span>
+        <span class="name"><span class="diamond">◆</span>M.Shahzaib Wajid</span>
         <span class="est">EST. 2026</span>
     </header>
 
