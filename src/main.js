@@ -15,7 +15,7 @@ app.innerHTML = `
       <span>Creative Developer | 3D Web Portfolio</span>
     </div>
     <div class="status">WebGL cloth online</div>
-    <div class="hint">Drag to look around. Scroll to zoom. The cloth is a live animated WebGL mesh with your name rendered into its texture.</div>
+    <div class="hint">Use W A S D to move the avatar. Drag to look around. Scroll to zoom. The cloth is a live animated WebGL mesh with your name rendered into its texture.</div>
     <div class="actions">
       <button type="button" id="focusCloth" aria-label="Focus cloth">Focus</button>
       <a href="mailto:hello@example.com" aria-label="Email M.Shahzaib Wajid">Email</a>
@@ -25,6 +25,17 @@ app.innerHTML = `
 
 const canvas = document.querySelector(".scene");
 const loader = document.querySelector("#loader");
+const clock = new THREE.Clock();
+const keys = new Set();
+const avatarMotion = {
+  mixer: null,
+  action: null,
+  isMoving: false,
+  direction: new THREE.Vector3(),
+  cameraForward: new THREE.Vector3(),
+  cameraRight: new THREE.Vector3(),
+  speed: 2.65,
+};
 const renderer = new THREE.WebGLRenderer({
   canvas,
   antialias: true,
@@ -80,6 +91,12 @@ scene.add(cloth.mesh, avatar);
 loadAvatarModel();
 
 window.addEventListener("resize", onResize);
+window.addEventListener("keydown", (event) => {
+  if (["KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowLeft", "ArrowDown", "ArrowRight"].includes(event.code)) {
+    keys.add(event.code);
+  }
+});
+window.addEventListener("keyup", (event) => keys.delete(event.code));
 document.querySelector("#focusCloth").addEventListener("click", focusCloth);
 
 setTimeout(() => loader.classList.add("hidden"), 1200);
@@ -219,6 +236,7 @@ function loadAvatarModel() {
       model.rotation.set(0, -0.22, 0);
       model.scale.setScalar(1.02);
       model.userData.baseY = model.position.y;
+      model.userData.turnOffset = Math.PI;
 
       model.traverse((child) => {
         if (!child.isMesh) return;
@@ -233,6 +251,14 @@ function loadAvatarModel() {
       scene.remove(avatar);
       scene.add(model);
       avatar.userData.model = model;
+
+      if (gltf.animations.length) {
+        avatarMotion.mixer = new THREE.AnimationMixer(model);
+        avatarMotion.action = avatarMotion.mixer.clipAction(gltf.animations[0]);
+        avatarMotion.action.play();
+        avatarMotion.action.paused = true;
+      }
+
       loader.classList.add("hidden");
     },
     undefined,
@@ -248,6 +274,7 @@ function createAvatar() {
   group.position.set(1.95, -0.55, 2.35);
   group.rotation.y = -0.22;
   group.userData.baseY = group.position.y;
+  group.userData.turnOffset = 0;
 
   const skin = new THREE.MeshStandardMaterial({ color: 0xf0b890, roughness: 0.55 });
   const hair = new THREE.MeshStandardMaterial({ color: 0xd8b14b, roughness: 0.8 });
@@ -327,10 +354,56 @@ function animateCloth(time) {
   cloth.mesh.geometry.computeVertexNormals();
 }
 
-function animateAvatar(time) {
+function animateAvatar(time, delta) {
   const model = avatar.userData.model || avatar;
-  model.position.y = (model.userData.baseY ?? model.position.y) + Math.sin(time * 1.4) * 0.025;
-  model.rotation.y = -0.22 + Math.sin(time * 0.7) * 0.035;
+  updateAvatarMovement(model, time, delta);
+
+  if (avatarMotion.mixer) {
+    avatarMotion.action.paused = !avatarMotion.isMoving;
+    avatarMotion.action.timeScale = avatarMotion.isMoving ? 1.2 : 0.2;
+    avatarMotion.mixer.update(delta);
+  } else {
+    const idleBob = Math.sin(time * 1.4) * 0.02;
+    const walkBob = avatarMotion.isMoving ? Math.abs(Math.sin(time * 8.5)) * 0.06 : 0;
+    model.position.y = (model.userData.baseY ?? model.position.y) + idleBob + walkBob;
+  }
+}
+
+function updateAvatarMovement(model, time, delta) {
+  avatarMotion.direction.set(0, 0, 0);
+
+  camera.getWorldDirection(avatarMotion.cameraForward);
+  avatarMotion.cameraForward.y = 0;
+  avatarMotion.cameraForward.normalize();
+  avatarMotion.cameraRight.crossVectors(avatarMotion.cameraForward, camera.up).normalize();
+
+  if (keys.has("KeyW") || keys.has("ArrowUp")) avatarMotion.direction.add(avatarMotion.cameraForward);
+  if (keys.has("KeyS") || keys.has("ArrowDown")) avatarMotion.direction.sub(avatarMotion.cameraForward);
+  if (keys.has("KeyD") || keys.has("ArrowRight")) avatarMotion.direction.add(avatarMotion.cameraRight);
+  if (keys.has("KeyA") || keys.has("ArrowLeft")) avatarMotion.direction.sub(avatarMotion.cameraRight);
+
+  avatarMotion.isMoving = avatarMotion.direction.lengthSq() > 0.001;
+
+  if (avatarMotion.isMoving) {
+    avatarMotion.direction.normalize();
+    const step = avatarMotion.speed * delta;
+    model.position.addScaledVector(avatarMotion.direction, step);
+    model.position.x = THREE.MathUtils.clamp(model.position.x, -7.5, 7.5);
+    model.position.z = THREE.MathUtils.clamp(model.position.z, -4.5, 8.5);
+
+    const targetYaw = Math.atan2(avatarMotion.direction.x, avatarMotion.direction.z) + (model.userData.turnOffset ?? 0);
+    model.rotation.y = lerpAngle(model.rotation.y, targetYaw, 1 - Math.pow(0.001, delta));
+  } else {
+    model.rotation.y += Math.sin(time * 0.7) * 0.0008;
+  }
+
+  const followTarget = new THREE.Vector3(model.position.x, model.position.y + 1.45, model.position.z);
+  controls.target.lerp(followTarget, avatarMotion.isMoving ? 0.08 : 0.025);
+}
+
+function lerpAngle(from, to, amount) {
+  const delta = Math.atan2(Math.sin(to - from), Math.cos(to - from));
+  return from + delta * amount;
 }
 
 function focusCloth() {
@@ -348,8 +421,9 @@ function onResize() {
 
 function render(timeMs) {
   const time = timeMs * 0.001;
+  const delta = Math.min(clock.getDelta(), 0.05);
   animateCloth(time);
-  animateAvatar(time);
+  animateAvatar(time, delta);
   controls.update();
   renderer.render(scene, camera);
 }
